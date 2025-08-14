@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="X-UA-Compatible" content="IE=edge"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Memorama BIN·AI — 2 Jugadores</title>
+<style>
+  :root{
+    --bg: #f5f7fb;
+    --card: #ffffff;
+    --accent: #6aa9ff;
+    --accent-2:#7bd389;
+    --text:#1f2d3d;
+    --muted:#7a8a9a;
+    --shadow: 0 6px 16px rgba(28,40,68,.12);
+    --radius:14px;
+
+    /* Estas dos serán ajustadas por JS según el ancho/alto disponible */
+    --card-w: 160px;  /* 3:4 ratio (w:h) */
+    --card-h: 213px;  /* se recalcula para mantener 3:4 */
+    --gap: 14px;
+    --cols: 6;
+    --rows: 4;
+  }
+
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;
+    font-family: ui-rounded, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji","Segoe UI Emoji","Segoe UI Symbol", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+
+  .topbar{
+    position: sticky; top: 0; z-index: 10;
+    background: linear-gradient(180deg,#fff,#f3f6ff);
+    box-shadow: var(--shadow);
+    padding: 10px 14px;
+  }
+  .topbar .row{
+    display:flex; align-items:center; justify-content:space-between;
+    gap:12px; max-width: 1400px; margin: 0 auto;
+  }
+  .title{
+    font-size: clamp(18px, 2.2vw, 26px);
+    font-weight: 800;
+    letter-spacing:.3px;
+  }
+  .controls{display:flex; gap:10px; align-items:center;}
+  .btn{
+    appearance:none; border:none; padding:10px 16px;
+    border-radius:12px; cursor:pointer; background:var(--accent);
+    color:white; font-weight:700; box-shadow: var(--shadow);
+    transition: transform .05s ease;
+  }
+  .btn:active{ transform: scale(.98) }
+  .btn.secondary{ background:#e9eef8; color:#2b3a4b; font-weight:600; }
+
+  .badge{
+    display:inline-flex; align-items:center; gap:8px;
+    background:#eef5ff; color:#2a4a86; padding:8px 12px;
+    border-radius:12px; box-shadow: var(--shadow);
+    font-weight:700;
+  }
+
+  .scorebar{
+    max-width: 1400px; margin: 8px auto 0 auto;
+    display:grid; grid-template-columns: repeat(2, 1fr); gap:12px;
+  }
+  .score{
+    background: var(--card);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    box-shadow: var(--shadow);
+    display:flex; align-items:center; justify-content:space-between;
+    font-weight: 700;
+  }
+  .score .player{ display:flex; align-items:center; gap:8px;}
+  .dot{
+    width:10px; height:10px; border-radius:50%;
+    background: var(--muted);
+  }
+  .active .dot{ background: var(--accent-2); box-shadow: 0 0 0 3px rgba(123,211,137,.25); }
+  .pairs{ color: var(--muted); font-weight:800;}
+  .pairs b{ color:#2b3a4b; }
+
+  .app{ width: min(1400px, 98vw); margin: 14px auto; padding: 0 6px 16px; }
+
+  .board{
+    margin-top: 12px;
+    background:linear-gradient(180deg,#ffffff, #f3f6ff);
+    border-radius: var(--radius);
+    padding: 16px;
+    box-shadow: var(--shadow);
+    display:grid;
+    grid-template-columns: repeat(var(--cols), var(--card-w));
+    grid-template-rows: repeat(var(--rows), var(--card-h));
+    gap: var(--gap);
+    justify-content:center;
+  }
+
+  .card{
+    width: var(--card-w);
+    height: var(--card-h);
+    perspective: 900px;
+    border-radius:12px;
+  }
+  .inner{
+    position:relative; width:100%; height:100%;
+    transform-style: preserve-3d;
+    transition: transform .38s cubic-bezier(.2,.8,.2,1);
+    border-radius:12px;
+  }
+  .flipped .inner{ transform: rotateY(180deg); }
+  .face{
+    position:absolute; inset:0; border-radius:12px; overflow:hidden;
+    backface-visibility:hidden; box-shadow: var(--shadow);
+  }
+  .front{
+    transform: rotateY(180deg);
+    background:#ffffff;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .front img{ width:100%; height:100%; object-fit:contain; background:#fff; }
+  .back{
+    background: #ffffff;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .back img{ width:100%; height:100%; object-fit:cover; filter: saturate(1.05); }
+
+  .card.matched .inner{ transform: rotateY(180deg); }
+  .card.matched{ outline: 3px solid rgba(123,211,137,.65); border-radius:14px; }
+
+  .footer{
+    display:flex; align-items:center; justify-content:space-between;
+    margin-top: 12px; color:var(--muted); font-size:13px;
+  }
+
+  /* Modal */
+  .modal{
+    position: fixed; inset:0; background: rgba(23,33,58,.4);
+    display:none; align-items:center; justify-content:center; padding: 20px;
+  }
+  .modal.open{ display:flex; }
+  .modal-card{
+    width:min(520px, 92vw); background:#fff; border-radius:16px;
+    box-shadow: var(--shadow); padding:22px; text-align:center;
+  }
+  .modal-card h2{ margin:8px 0 4px 0 }
+  .modal-card p{ color:var(--muted); margin:2px 0 16px 0 }
+</style>
+</head>
+<body>
+
+  <!-- Barra superior (marcador y controles) -->
+  <div class="topbar">
+    <div class="row">
+      <div class="title">🧩 Memorama — 2 Jugadores</div>
+      <div class="controls">
+        <span id="turnBadge" class="badge">Turno: <strong id="turnText">Jugador 1</strong></span>
+        <button id="restartBtn" class="btn" title="Reiniciar partida">Reiniciar</button>
+      </div>
+    </div>
+    <div class="row" style="margin-top:8px;">
+      <div class="scorebar">
+        <div id="p1" class="score active">
+          <div class="player"><span class="dot"></span> Jugador 1</div>
+          <div class="pairs">Pares: <b id="p1Score">0</b></div>
+        </div>
+        <div id="p2" class="score">
+          <div class="player"><span class="dot"></span> Jugador 2</div>
+          <div class="pairs">Pares: <b id="p2Score">0</b></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="app">
+    <div id="board" class="board" aria-label="Tablero 6x4"></div>
+    <div class="footer">
+      <div>Regla: el turno <strong>solo cambia</strong> si fallas el par. Si aciertas, sigues jugando.</div>
+      <div>Cartas 3:4 | Ajuste dinámico a desktop</div>
+    </div>
+  </div>
+
+  <!-- Modal final -->
+  <div id="modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-card">
+      <h2 id="modalTitle">🎉 ¡Partida terminada!</h2>
+      <p id="modalMsg"></p>
+      <button id="playAgain" class="btn">Jugar de nuevo</button>
+      <button id="closeModal" class="btn secondary" style="margin-left:8px;">Cerrar</button>
+    </div>
+  </div>
+
+<script>
+(function(){
+  // ====== CONFIGURACIÓN DE RUTAS ======
+  // Ruta exacta (file://) como indicaste
+  const BASE_PATH = "file:///C:/Users/f_mat/OneDrive/Documentos/BInAI/AI_EMPRENDEDOR/EXCERCISES/MEMORAMA/";
+  const BACK_IMG = BASE_PATH + "back.png";
+
+  // Letras A–L → 12 pares
+  const LETTERS = Array.from("ABCDEFGHIJKL"); // 12
+  const DELAY_MS = 1500;
+  const COLS = 6, ROWS = 4; // 6x4 = 24
+
+  // ====== ESTADO ======
+  let deck = [];                 // baraja actual (24 elementos)
+  let lastDeckSignature = null;  // para evitar repetir el mismo orden entre partidas
+  let firstCard = null;          // primer click
+  let secondCard = null;         // segundo click
+  let lockBoard = false;         // bloqueo para evitar 3er click
+  let currentPlayer = 1;         // 1 o 2
+  let scores = {1:0, 2:0};
+  let matchedPairs = 0;
+
+  // UI
+  const boardEl = document.getElementById('board');
+  const turnText = document.getElementById('turnText');
+  const p1 = document.getElementById('p1');
+  const p2 = document.getElementById('p2');
+  const p1ScoreEl = document.getElementById('p1Score');
+  const p2ScoreEl = document.getElementById('p2Score');
+  const restartBtn = document.getElementById('restartBtn');
+
+  const modal = document.getElementById('modal');
+  const modalMsg = document.getElementById('modalMsg');
+  const closeModal = document.getElementById('closeModal');
+  const playAgain = document.getElementById('playAgain');
+
+  // ====== GRID y AJUSTE DINÁMICO (desktop) ======
+  function fitBoard(){
+    // Ajuste para que quepan 24 cartas (6x4) completas en la pantalla de desktop
+    const styles = getComputedStyle(boardEl);
+    const padLeft = parseFloat(styles.paddingLeft) || 0;
+    const padRight = parseFloat(styles.paddingRight) || 0;
+    const padTop = parseFloat(styles.paddingTop) || 0;
+    const padBottom = parseFloat(styles.paddingBottom) || 0;
+    const gap = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--gap')) || 14;
+
+    // Dimensión disponible en ancho dentro del contenedor del tablero
+    const containerWidth = boardEl.clientWidth - padLeft - padRight;
+    const totalGapsW = gap * (COLS - 1);
+    const cardW_fromWidth = Math.floor((containerWidth - totalGapsW) / COLS);
+
+    // Dimensión disponible en alto de la ventana menos barra superior y footer
+    const topbar = document.querySelector('.topbar');
+    const footer = document.querySelector('.footer');
+    const topbarH = topbar ? topbar.offsetHeight : 0;
+    const footerH = footer ? footer.offsetHeight : 0;
+
+    const viewportH = window.innerHeight;
+    const availableH = viewportH - topbarH - footerH - 24; // pequeño margen
+    const totalGapsH = gap * (ROWS - 1);
+    const insideBoardH = availableH - padTop - padBottom;
+    const cardH_fromHeight = Math.floor((insideBoardH - totalGapsH) / ROWS);
+    // Convertimos altura a ancho manteniendo 3:4 (w:h)
+    const cardW_fromHeight = Math.floor(cardH_fromHeight * 3 / 4);
+
+    // Elegimos el menor para garantizar que quepa tanto por ancho como por alto
+    const cardW = Math.max(60, Math.min(cardW_fromWidth, cardW_fromHeight));
+    const cardH = Math.round(cardW * 4 / 3);
+
+    document.documentElement.style.setProperty('--card-w', cardW + 'px');
+    document.documentElement.style.setProperty('--card-h', cardH + 'px');
+    document.documentElement.style.setProperty('--cols', COLS);
+    document.documentElement.style.setProperty('--rows', ROWS);
+  }
+  window.addEventListener('resize', fitBoard);
+
+  // ====== UTILIDADES ======
+  function shuffle(array){
+    for(let i=array.length-1;i>0;i--){
+      const j = Math.floor(Math.random()*(i+1));
+      [array[i], array[j]] = [array[j], array[i]];
+    }
+    return array;
+  }
+  function signature(arr){
+    return arr.map(c => c.key).join("|");
+  }
+
+  // Precarga de imágenes (siempre ON por default)
+  function preloadImages(){
+    const imgs = [BACK_IMG];
+    LETTERS.forEach(L=>{
+      imgs.push(BASE_PATH + `${L}_1.png`);
+      imgs.push(BASE_PATH + `${L}_2.png`);
+    });
+    imgs.forEach(src => { const im = new Image(); im.src = src; });
+  }
+
+  // ====== CREACIÓN DEL MAZO ======
+  function buildDeck(){
+    const cards = [];
+    LETTERS.forEach(L=>{
+      cards.push({letter:L, pair:1, key: `${L}_1`, front: BASE_PATH + `${L}_1.png`});
+      cards.push({letter:L, pair:2, key: `${L}_2`, front: BASE_PATH + `${L}_2.png`});
+    });
+    return cards;
+  }
+
+  function newShuffledDeckAvoidRepeat(){
+    let tries = 0;
+    let next;
+    do{
+      next = shuffle(buildDeck().slice());
+      tries++;
+    } while(lastDeckSignature && signature(next) === lastDeckSignature && tries < 10);
+    lastDeckSignature = signature(next);
+    return next;
+  }
+
+  // ====== RENDER ======
+  function renderBoard(){
+    boardEl.innerHTML = "";
+    deck.forEach((card, idx) => {
+      const el = document.createElement('div');
+      el.className = 'card';
+      el.dataset.index = idx;
+      el.dataset.letter = card.letter;
+
+      const inner = document.createElement('div');
+      inner.className = 'inner';
+
+      const front = document.createElement('div');
+      front.className = 'face front';
+      const imgFront = document.createElement('img');
+      imgFront.src = card.front;
+      imgFront.alt = `Carta ${card.letter}`;
+      front.appendChild(imgFront);
+
+      const back = document.createElement('div');
+      back.className = 'face back';
+      const imgBack = document.createElement('img');
+      imgBack.src = BACK_IMG;
+      imgBack.alt = "Dorso";
+      back.appendChild(imgBack);
+
+      inner.appendChild(front);
+      inner.appendChild(back);
+      el.appendChild(inner);
+      el.addEventListener('click', onCardClick);
+      boardEl.appendChild(el);
+    });
+    // Ajustar tamaño después de pintar
+    fitBoard();
+  }
+
+  function setTurnUI(){
+    turnText.textContent = currentPlayer === 1 ? "Jugador 1" : "Jugador 2";
+    if(currentPlayer === 1){
+      p1.classList.add('active'); p2.classList.remove('active');
+    }else{
+      p2.classList.add('active'); p1.classList.remove('active');
+    }
+  }
+
+  function resetState(){
+    firstCard = null;
+    secondCard = null;
+    lockBoard = false;
+    matchedPairs = 0;
+    scores = {1:0,2:0};
+    p1ScoreEl.textContent = "0";
+    p2ScoreEl.textContent = "0";
+    currentPlayer = 1;
+    setTurnUI();
+  }
+
+  function startGame(){
+    preloadImages(); // siempre precarga (default)
+    resetState();
+    deck = newShuffledDeckAvoidRepeat(); // 24 cartas
+    renderBoard();
+    runSelfTests(); // auto-pruebas en consola
+  }
+
+  // ====== LÓGICA DE CLIC ======
+  function onCardClick(e){
+    const cardEl = e.currentTarget;
+    if(lockBoard) return; // bloqueo siempre activo durante la espera
+    if(cardEl.classList.contains('flipped') || cardEl.classList.contains('matched')) return;
+    if(firstCard && secondCard) return;
+
+    flip(cardEl);
+
+    if(!firstCard){ firstCard = cardEl; return; }
+
+    secondCard = cardEl;
+    const isMatch = firstCard.dataset.letter === secondCard.dataset.letter;
+
+    if(isMatch){
+      setMatched(firstCard, secondCard);
+      addPoint(currentPlayer);
+      clearSelection();
+      matchedPairs++;
+      if(matchedPairs === LETTERS.length){ endGame(); }
+      // mantiene turno si acierta
+    }else{
+      lockBoard = true;
+      setTimeout(()=>{
+        unflip(firstCard); unflip(secondCard);
+        clearSelection();
+        lockBoard = false;
+        currentPlayer = currentPlayer === 1 ? 2 : 1;
+        setTurnUI();
+      }, DELAY_MS);
+    }
+  }
+
+  function flip(cardEl){ cardEl.classList.add('flipped'); }
+  function unflip(cardEl){ cardEl.classList.remove('flipped'); }
+  function setMatched(a,b){
+    a.classList.add('matched'); b.classList.add('matched');
+    a.removeEventListener('click', onCardClick);
+    b.removeEventListener('click', onCardClick);
+  }
+  function clearSelection(){ firstCard = null; secondCard = null; }
+
+  function addPoint(player){
+    scores[player]++;
+    if(player===1){ p1ScoreEl.textContent = String(scores[1]); }
+    else{ p2ScoreEl.textContent = String(scores[2]); }
+  }
+
+  // ====== FIN DE PARTIDA ======
+  function endGame(){
+    let msg = "";
+    if(scores[1] > scores[2]) msg = `🏆 Ganador: Jugador 1 (${scores[1]} – ${scores[2]})`;
+    else if(scores[2] > scores[1]) msg = `🏆 Ganador: Jugador 2 (${scores[2]} – ${scores[1]})`;
+    else msg = `🤝 ¡Empate! (${scores[1]} – ${scores[2]})`;
+    modalMsg.textContent = msg;
+    modal.classList.add('open');
+  }
+
+  // ====== AUTO-PRUEBAS (tests) ======
+  function runSelfTests(){
+    try{
+      console.group("🧪 Memorama Self-Tests");
+      // Test 1: tamaño del mazo
+      console.assert(deck.length === 24, `Deck length debe ser 24, es ${deck.length}`);
+
+      // Test 2: grid 6x4
+      console.assert(COLS * ROWS === 24, `Grid debe ser 24, es ${COLS*ROWS}`);
+
+      // Test 3: letras A–L
+      const expectedLetters = Array.from("ABCDEFGHIJKL");
+      const deckLetters = Array.from(new Set(deck.map(c=>c.letter))).sort();
+      console.assert(JSON.stringify(deckLetters) === JSON.stringify(expectedLetters),
+        `Letras deben ser A-L, son ${deckLetters.join(',')}`);
+
+      // Test 4: dos cartas por letra
+      const counts = deck.reduce((m,c)=> (m[c.letter]=(m[c.letter]||0)+1, m), {});
+      const allPairs = Object.values(counts).every(n=>n===2);
+      console.assert(allPairs, `Cada letra debe aparecer 2 veces: ${JSON.stringify(counts)}`);
+
+      // Test 5: variables CSS calculadas
+      const cw = getComputedStyle(document.documentElement).getPropertyValue('--card-w');
+      const ch = getComputedStyle(document.documentElement).getPropertyValue('--card-h');
+      console.assert(parseInt(cw) > 0 && parseInt(ch) > 0, `Card size inválido: w=${cw}, h=${ch}`);
+
+      console.log("✅ Tests básicos OK");
+      console.groupEnd();
+    }catch(err){
+      console.error("❌ Error en self-tests:", err);
+    }
+  }
+
+  // ====== EVENTOS ======
+  restartBtn.addEventListener('click', ()=>{ modal.classList.remove('open'); startGame(); });
+  playAgain.addEventListener('click', ()=>{ modal.classList.remove('open'); startGame(); });
+  closeModal.addEventListener('click', ()=> modal.classList.remove('open'));
+
+  // ====== INICIO ======
+  startGame();
+})();
+</script>
+</body>
+</html>
+
+
+
+
+
