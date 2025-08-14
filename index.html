@@ -19,8 +19,8 @@
     /* Estas dos serán ajustadas por JS según el ancho/alto disponible */
     --card-w: 160px;  /* 3:4 ratio (w:h) */
     --card-h: 213px;  /* se recalcula para mantener 3:4 */
-    --gap: 14px;
-    --cols: 6;
+    --gap: 14px;      /* JS la baja a 10px en móvil */
+    --cols: 6;        /* Desktop 6x4; móvil 4x6 */
     --rows: 4;
   }
 
@@ -135,8 +135,9 @@
 
   .footer{
     display:flex; align-items:center; justify-content:space-between;
-    margin-top: 12px; color:var(--muted); font-size:13px;
+    margin-top: 12px; color: var(--muted); font-size:13px;
   }
+  .footer .mode{ font-weight:700; color:#2b3a4b; }
 
   /* Modal */
   .modal{
@@ -178,10 +179,10 @@
   </div>
 
   <div class="app">
-    <div id="board" class="board" aria-label="Tablero 6x4"></div>
+    <div id="board" class="board" aria-label="Tablero dinámico (6x4 / 4x6)"></div>
     <div class="footer">
       <div>Regla: el turno <strong>solo cambia</strong> si fallas el par. Si aciertas, sigues jugando.</div>
-      <div>Cartas 3:4 | Ajuste dinámico a desktop</div>
+      <div>Cartas 3:4 | Modo: <span id="mode" class="mode">Desktop 6×4</span></div>
     </div>
   </div>
 
@@ -197,26 +198,43 @@
 
 <script>
 (function(){
-  // ====== CONFIGURACIÓN DE RUTAS ======
-  // Ruta exacta (file://) como indicaste
-
+  // ====== RUTAS (local vs web) ======
   const BASE_PATH = (location.protocol === 'file:')
     ? "file:///C:/Users/f_mat/OneDrive/Documentos/BInAI/AI_EMPRENDEDOR/EXCERCISES/MEMORAMA/"
     : "./assets/";
   const BACK_IMG = BASE_PATH + "back.png";
 
   // Letras A–L → 12 pares
-  const LETTERS = Array.from("ABCDEFGHIJKL"); // 12
+  const LETTERS = Array.from("ABCDEFGHIJKL");
   const DELAY_MS = 1500;
-  const COLS = 6, ROWS = 4; // 6x4 = 24
+
+  // ====== GRID dinámico (desktop/móvil) ======
+  const DESKTOP_GRID = { cols: 6, rows: 4 }; // 6x4
+  const MOBILE_GRID  = { cols: 4, rows: 6 }; // 4x6
+  let GRID = { ...DESKTOP_GRID };
+
+  function computeGrid(){
+    // Móvil si ancho <= 768 o retrato con ancho moderado
+    const isMobile = window.innerWidth <= 768
+                  || (window.innerHeight > window.innerWidth && window.innerWidth <= 1024);
+    GRID = isMobile ? { ...MOBILE_GRID } : { ...DESKTOP_GRID };
+  }
+  function applyGridToCSS(){
+    const root = document.documentElement;
+    root.style.setProperty('--cols', GRID.cols);
+    root.style.setProperty('--rows', GRID.rows);
+    root.style.setProperty('--gap', GRID.cols === 4 ? '10px' : '14px');
+    const modeEl = document.getElementById('mode');
+    if(modeEl) modeEl.textContent = (GRID.cols === 4 ? 'Móvil 4×6' : 'Desktop 6×4');
+  }
 
   // ====== ESTADO ======
-  let deck = [];                 // baraja actual (24 elementos)
-  let lastDeckSignature = null;  // para evitar repetir el mismo orden entre partidas
+  let deck = [];                 // baraja actual (24)
+  let lastDeckSignature = null;  // evitar repetir orden entre partidas
   let firstCard = null;          // primer click
   let secondCard = null;         // segundo click
-  let lockBoard = false;         // bloqueo para evitar 3er click
-  let currentPlayer = 1;         // 1 o 2
+  let lockBoard = false;         // bloqueo durante 1.5s en fallo
+  let currentPlayer = 1;         // 1 ó 2
   let scores = {1:0, 2:0};
   let matchedPairs = 0;
 
@@ -234,9 +252,9 @@
   const closeModal = document.getElementById('closeModal');
   const playAgain = document.getElementById('playAgain');
 
-  // ====== GRID y AJUSTE DINÁMICO (desktop) ======
+  // ====== Ajuste de cartas a viewport ======
   function fitBoard(){
-    // Ajuste para que quepan 24 cartas (6x4) completas en la pantalla de desktop
+    // Calcula tamaño de carta que cabe en ancho y alto, respetando GRID y 3:4
     const styles = getComputedStyle(boardEl);
     const padLeft = parseFloat(styles.paddingLeft) || 0;
     const padRight = parseFloat(styles.paddingRight) || 0;
@@ -244,35 +262,33 @@
     const padBottom = parseFloat(styles.paddingBottom) || 0;
     const gap = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--gap')) || 14;
 
-    // Dimensión disponible en ancho dentro del contenedor del tablero
+    // Por ancho
     const containerWidth = boardEl.clientWidth - padLeft - padRight;
-    const totalGapsW = gap * (COLS - 1);
-    const cardW_fromWidth = Math.floor((containerWidth - totalGapsW) / COLS);
+    const totalGapsW = gap * (GRID.cols - 1);
+    const cardW_fromWidth = Math.floor((containerWidth - totalGapsW) / GRID.cols);
 
-    // Dimensión disponible en alto de la ventana menos barra superior y footer
+    // Por alto (restando topbar y footer)
     const topbar = document.querySelector('.topbar');
     const footer = document.querySelector('.footer');
     const topbarH = topbar ? topbar.offsetHeight : 0;
     const footerH = footer ? footer.offsetHeight : 0;
 
     const viewportH = window.innerHeight;
-    const availableH = viewportH - topbarH - footerH - 24; // pequeño margen
-    const totalGapsH = gap * (ROWS - 1);
+    const availableH = viewportH - topbarH - footerH - 24;
+    const totalGapsH = gap * (GRID.rows - 1);
     const insideBoardH = availableH - padTop - padBottom;
-    const cardH_fromHeight = Math.floor((insideBoardH - totalGapsH) / ROWS);
-    // Convertimos altura a ancho manteniendo 3:4 (w:h)
-    const cardW_fromHeight = Math.floor(cardH_fromHeight * 3 / 4);
+    const cardH_fromHeight = Math.floor((insideBoardH - totalGapsH) / GRID.rows);
+    const cardW_fromHeight = Math.floor(cardH_fromHeight * 3 / 4); // 3:4
 
-    // Elegimos el menor para garantizar que quepa tanto por ancho como por alto
-    const cardW = Math.max(60, Math.min(cardW_fromWidth, cardW_fromHeight));
+    // El menor para garantizar que quepa por ancho y por alto
+    const cardW = Math.max(56, Math.min(cardW_fromWidth, cardW_fromHeight));
     const cardH = Math.round(cardW * 4 / 3);
 
     document.documentElement.style.setProperty('--card-w', cardW + 'px');
     document.documentElement.style.setProperty('--card-h', cardH + 'px');
-    document.documentElement.style.setProperty('--cols', COLS);
-    document.documentElement.style.setProperty('--rows', ROWS);
   }
-  window.addEventListener('resize', fitBoard);
+  window.addEventListener('resize', ()=>{ computeGrid(); applyGridToCSS(); fitBoard(); });
+  window.addEventListener('orientationchange', ()=>{ computeGrid(); applyGridToCSS(); fitBoard(); });
 
   // ====== UTILIDADES ======
   function shuffle(array){
@@ -282,9 +298,7 @@
     }
     return array;
   }
-  function signature(arr){
-    return arr.map(c => c.key).join("|");
-  }
+  function signature(arr){ return arr.map(c => c.key).join("|"); }
 
   // Precarga de imágenes (siempre ON por default)
   function preloadImages(){
@@ -349,7 +363,9 @@
       el.addEventListener('click', onCardClick);
       boardEl.appendChild(el);
     });
-    // Ajustar tamaño después de pintar
+    // Ajuste de grid/tamaños tras pintar
+    computeGrid();
+    applyGridToCSS();
     fitBoard();
   }
 
@@ -385,7 +401,7 @@
   // ====== LÓGICA DE CLIC ======
   function onCardClick(e){
     const cardEl = e.currentTarget;
-    if(lockBoard) return; // bloqueo siempre activo durante la espera
+    if(lockBoard) return; // bloqueo durante la espera
     if(cardEl.classList.contains('flipped') || cardEl.classList.contains('matched')) return;
     if(firstCard && secondCard) return;
 
@@ -402,7 +418,7 @@
       clearSelection();
       matchedPairs++;
       if(matchedPairs === LETTERS.length){ endGame(); }
-      // mantiene turno si acierta
+      // mantiene turno al acertar
     }else{
       lockBoard = true;
       setTimeout(()=>{
@@ -447,8 +463,9 @@
       // Test 1: tamaño del mazo
       console.assert(deck.length === 24, `Deck length debe ser 24, es ${deck.length}`);
 
-      // Test 2: grid 6x4
-      console.assert(COLS * ROWS === 24, `Grid debe ser 24, es ${COLS*ROWS}`);
+      // Test 2: grid 6x4 o 4x6
+      console.assert([24].includes(GRID.cols * GRID.rows),
+        `Grid debe ser 24, es ${GRID.cols*GRID.rows}`);
 
       // Test 3: letras A–L
       const expectedLetters = Array.from("ABCDEFGHIJKL");
@@ -484,7 +501,6 @@
 </script>
 </body>
 </html>
-
 
 
 
